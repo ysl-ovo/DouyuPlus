@@ -43,9 +43,8 @@ public class TestRunner {
     public static void init(final XC_LoadPackage.LoadPackageParam lpparam) {
         startLogCollectorIfNeeded();
         try {
-            // 针对具体 Activity 进行 Hook，避免 bootclasspath 限制
+            // 针对具体 Activity 进行 Hook，避免 bootclasspath 限制（DYLauncherActivity 未覆写 onResume，直接跳过避免无意义告警）
             String[] targetActivities = new String[]{
-                    "tv.douyu.view.activity.launcher.DYLauncherActivity",
                     "com.douyu.module.home.pages.main.MainActivity",
                     "com.douyu.module.player.p.rambobase.RamboPlayerActivity"
             };
@@ -58,7 +57,7 @@ public class TestRunner {
                         protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                             Activity activity = (Activity) param.thisObject;
                             sCurrentActivityRef = new WeakReference<>(activity);
-                            Log.i(TAG, "Current resumed activity: " + activity.getClass().getName());
+                            DouyuLog.d(TAG, "Current resumed activity: " + activity.getClass().getName());
 
                             if (!sReceiverRegistered) {
                                 sReceiverRegistered = true;
@@ -72,6 +71,9 @@ public class TestRunner {
                                         Log.i(TAG, "============================================================");
                                         final String targetRoomId = intent.getStringExtra("room_id");
                                         final String manualRate = intent.getStringExtra("manual_rate");
+                                        final String autoLineExtra = intent.getStringExtra("enable_auto_line");
+                                        final boolean openFollowFans = intent.getBooleanExtra("open_follow_fans", false);
+                                        final boolean openNewFollow = intent.getBooleanExtra("open_new_follow", false);
                                         new Handler(Looper.getMainLooper()).post(new Runnable() {
                                             @Override
                                             public void run() {
@@ -79,6 +81,14 @@ public class TestRunner {
                                                 if (curAct == null || curAct.isFinishing()) {
                                                     Log.w(TAG, "No active resumed activity available for test");
                                                     return;
+                                                }
+                                                boolean handled = false;
+                                                if (autoLineExtra != null && !autoLineExtra.isEmpty()) {
+                                                    boolean enable = Boolean.parseBoolean(autoLineExtra);
+                                                    DouyuPlusConfig.setAutoSwitchLineEnabled(curAct, enable);
+                                                    Log.i(TAG, "Updated enable_auto_switch_line=" + enable
+                                                            + " (readBack=" + DouyuPlusConfig.isAutoSwitchLineEnabled(curAct) + ")");
+                                                    handled = true;
                                                 }
                                                 if (manualRate != null && !manualRate.isEmpty()) {
                                                     io.github.ysl_ovo.douyuplus.hooks.AutoQualityHook.simulateUserManualSwitch(manualRate, "用户手动测试_" + manualRate);
@@ -90,7 +100,33 @@ public class TestRunner {
                                                     } catch (Throwable t) {
                                                         Log.e(TAG, "Failed to launch room: " + targetRoomId, t);
                                                     }
-                                                } else {
+                                                } else if (openFollowFans) {
+                                                    try {
+                                                        String uid = "";
+                                                        try {
+                                                            Class<?> userBoxCls = XposedHelpers.findClass("com.douyu.module.base.user.UserBox", lpparam.classLoader);
+                                                            Object userBox = XposedHelpers.callStaticMethod(userBoxCls, "b");
+                                                            if (userBox != null) {
+                                                                Object uidObj = XposedHelpers.callMethod(userBox, "getUid");
+                                                                if (uidObj != null) uid = String.valueOf(uidObj);
+                                                            }
+                                                        } catch (Throwable ignored) {}
+                                                        Class<?> ktCls = XposedHelpers.findClass("com.douyu.module.follow.p.live.page.myfollow.FollowFansActivityKt", lpparam.classLoader);
+                                                        XposedHelpers.callStaticMethod(ktCls, "a", curAct, uid, null, "TestUser", 0, 0, true);
+                                                        Log.i(TAG, "Launched FollowFansActivityKt.a with uid='" + uid + "'");
+                                                    } catch (Throwable t) {
+                                                        Log.e(TAG, "Failed to launch FollowFansActivity", t);
+                                                    }
+                                                } else if (openNewFollow) {
+                                                    try {
+                                                        Class<?> providerCls = XposedHelpers.findClass("com.douyu.module.follow.p.live.FollowLiveProvider", lpparam.classLoader);
+                                                        Object provider = providerCls.newInstance();
+                                                        XposedHelpers.callMethod(provider, "v4", curAct, 0, false, false);
+                                                        Log.i(TAG, "Launched NewFollowActivity via FollowLiveProvider.v4");
+                                                    } catch (Throwable t) {
+                                                        Log.e(TAG, "Failed to launch NewFollowActivity", t);
+                                                    }
+                                                } else if (!handled) {
                                                     runEndToEndTest(curAct, lpparam);
                                                 }
                                             }
@@ -102,7 +138,7 @@ public class TestRunner {
                                 } else {
                                     appCtx.registerReceiver(receiver, filter);
                                 }
-                                Log.i(TAG, "✓ Successfully registered ACTION_TEST receiver on Application Context!");
+                                DouyuLog.d(TAG, "Registered ACTION_TEST receiver on Application Context");
                             }
                         }
                     });
@@ -287,8 +323,8 @@ public class TestRunner {
 
     private static boolean isRelevantLogLine(String line) {
         return line != null && (line.contains("DouyuPlus")
+                || line.contains("io.github.ysl_ovo.douyuplus")
                 || line.contains("AndroidRuntime")
-                || line.contains("Xposed")
                 || line.contains("FATAL EXCEPTION"));
     }
 
@@ -352,6 +388,7 @@ public class TestRunner {
             sb.append("Config: padMode=").append(DouyuPlusConfig.isPadModeEnabled())
                     .append(", adBlock=").append(DouyuPlusConfig.isAdBlockEnabled())
                     .append(", autoQuality=").append(DouyuPlusConfig.getAutoQualityMode(context))
+                    .append(", autoSwitchLine=").append(DouyuPlusConfig.isAutoSwitchLineEnabled(context))
                     .append(", aiStrengthen=").append(DouyuPlusConfig.isAiStrengthenEnabled())
                     .append(" (SGSR=").append(DouyuPlusConfig.getSgsrLevel(context))
                     .append("%, CAS=").append(DouyuPlusConfig.getCasLevel(context)).append("%)")

@@ -12,6 +12,7 @@ import android.view.ViewStub;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
+import io.github.ysl_ovo.douyuplus.DouyuLog;
 import io.github.ysl_ovo.douyuplus.DouyuPlusConfig;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XC_MethodReplacement;
@@ -56,13 +57,14 @@ public class AiStrengthenHook {
 
         ClassLoader cl = lpparam.classLoader;
         Class<?> roomRtmpInfoCls = null;
+        int hookedTargets = 0;
 
         // 1. 突破房间白名单限制：所有直播间强制开放画质增强
         try {
             roomRtmpInfoCls = XposedHelpers.findClass(
                     "com.douyu.sdk.playerframework.business.live.liveuser.beans.RoomRtmpInfo", cl);
             XposedHelpers.findAndHookMethod(roomRtmpInfoCls, "isStrongerOpen", XC_MethodReplacement.returnConstant(true));
-            Log.i(TAG, "✓ Hooked RoomRtmpInfo: force isStrongerOpen = true");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook RoomRtmpInfo.isStrongerOpen", t);
         }
@@ -72,7 +74,7 @@ public class AiStrengthenHook {
             Class<?> blackListCls = XposedHelpers.findClass(
                     "com.douyu.sdk.liveshell.init.PlayDotConfig$StrongStreamerBlackList", cl);
             XposedHelpers.findAndHookMethod(blackListCls, "d", XC_MethodReplacement.returnConstant(false));
-            Log.i(TAG, "✓ Hooked PlayDotConfig.StrongStreamerBlackList: bypassed blacklist");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook PlayDotConfig.StrongStreamerBlackList", t);
         }
@@ -116,13 +118,17 @@ public class AiStrengthenHook {
                 });
             }
 
-            // o(boolean, boolean) -> 用户手动切换开关时记录状态，并联动更新 SeekBar 显隐与底层渲染管线
+            // o(boolean, boolean) -> 开关状态变更或用户手动切换时记录状态，并联动更新 SeekBar 显隐与底层渲染管线
             XposedHelpers.findAndHookMethod(playMgrCls, "o", boolean.class, boolean.class, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     final boolean isOpen = (Boolean) param.args[0];
+                    final boolean persist = param.args.length > 1 && Boolean.TRUE.equals(param.args[1]);
+                    final boolean stateChanged = (sUserManuallyDisabled != !isOpen);
                     sUserManuallyDisabled = !isOpen;
-                    Log.i(TAG, "User toggled video enhance switch: " + isOpen);
+                    if (persist || stateChanged) {
+                        DouyuLog.d(TAG, (persist ? "User toggled video enhance switch: " : "Video enhance state updated: ") + isOpen);
+                    }
 
                     // 1. 直接同步通知底层播放器激活或关闭增强管线
                     if (sCurrentPlayerRender != null) {
@@ -130,7 +136,9 @@ public class AiStrengthenHook {
                         if (player != null) {
                             try {
                                 XposedHelpers.callMethod(player, "setEnableVideoEnhance", isOpen);
-                                Log.i(TAG, "Directly synchronized DYPlayerRenderImpl.setEnableVideoEnhance(" + isOpen + ")");
+                                if (persist || stateChanged) {
+                                    DouyuLog.d(TAG, "Synced DYPlayerRenderImpl.setEnableVideoEnhance(" + isOpen + ")");
+                                }
                             } catch (Throwable t) {
                                 Log.w(TAG, "Failed to sync setEnableVideoEnhance to DYPlayerRenderImpl", t);
                             }
@@ -155,7 +163,7 @@ public class AiStrengthenHook {
             // k() -> onVideoEnhanceError，阻断防止标记设备不支持
             XposedHelpers.findAndHookMethod(playMgrCls, "k", XC_MethodReplacement.DO_NOTHING);
 
-            Log.i(TAG, "✓ Hooked AiStrengthenPlayManager: support=true, blacklist=false, default=true");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook AiStrengthenPlayManager", t);
         }
@@ -215,7 +223,7 @@ public class AiStrengthenHook {
                 }
             });
 
-            Log.i(TAG, "✓ Hooked AiStrengthenNeuron: GE=true, lC.j=true, Aw/qu customized with SeekBar");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook AiStrengthenNeuron", t);
         }
@@ -239,7 +247,7 @@ public class AiStrengthenHook {
                     }
                 }
             });
-            Log.i(TAG, "✓ Hooked RamboDefinitionView2.f: guaranteed SeekBar injection");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook RamboDefinitionView2.f", t);
         }
@@ -285,7 +293,7 @@ public class AiStrengthenHook {
                         }
                     }
                 });
-                Log.i(TAG, "✓ Hooked VideoFrame.getEnhandceEnable: unblocked 2K frames for enhanceRender");
+                hookedTargets++;
             } catch (Throwable t) {
                 Log.w(TAG, "Failed to hook VideoFrame.getEnhandceEnable", t);
             }
@@ -302,7 +310,7 @@ public class AiStrengthenHook {
                     int level = getEffectiveEnhanceLevel(null);
                     try {
                         XposedHelpers.callMethod(param.thisObject, "setVideoEnhanceLevel", level);
-                        Log.i(TAG, "DYEnhanceRender.init -> applied videoEnhanceLevel: " + level);
+                        DouyuLog.d(TAG, "DYEnhanceRender.init -> applied videoEnhanceLevel: " + level);
                     } catch (Throwable t) {
                         Log.w(TAG, "Failed to setVideoEnhanceLevel on init", t);
                     }
@@ -318,12 +326,12 @@ public class AiStrengthenHook {
                     int userLevel = getEffectiveEnhanceLevel(null);
                     if (requestedLevel == 100 && userLevel != 100) {
                         param.args[0] = userLevel;
-                        Log.i(TAG, "Overrode hardcoded setVideoEnhanceLevel(100) -> " + userLevel);
+                        DouyuLog.d(TAG, "Overrode hardcoded setVideoEnhanceLevel(100) -> " + userLevel);
                     }
                 }
             });
 
-            // 监控底层渲染帧调用频率，验证着色器是否持续生效
+            // 监控底层渲染首帧，确认着色器已激活（仅首次打印，避免周期性刷屏）
             XposedHelpers.findAndHookMethod(enhanceRenderCls, "render", int.class, int.class, int.class, new XC_MethodHook() {
                 private long renderCount = 0;
                 @Override
@@ -334,8 +342,8 @@ public class AiStrengthenHook {
                         sCurrentVideoHeight = (Integer) param.args[2];
                     } catch (Throwable ignored) {}
                     renderCount++;
-                    if (renderCount % 300 == 1) {
-                        Log.i(TAG, "DYEnhanceRender.render ACTIVE (Frame #" + renderCount + ", tex=" + param.args[0] + ", res=" + param.args[1] + "x" + param.args[2] + ")");
+                    if (renderCount == 1) {
+                        Log.i(TAG, "DYEnhanceRender.render ACTIVE (tex=" + param.args[0] + ", res=" + param.args[1] + "x" + param.args[2] + ")");
                     }
                 }
             });
@@ -353,9 +361,10 @@ public class AiStrengthenHook {
                     if (!sUserManuallyDisabled && DouyuPlusConfig.isAiStrengthenEnabled() && !enable) {
                         param.args[0] = true;
                         enable = true;
-                        Log.i(TAG, "DYPlayerRenderImpl.setEnableVideoEnhance(false) overridden -> true");
+                        DouyuLog.d(TAG, "DYPlayerRenderImpl.setEnableVideoEnhance(false) overridden -> true");
+                    } else {
+                        DouyuLog.d(TAG, "DYPlayerRenderImpl.setEnableVideoEnhance called: " + enable);
                     }
-                    Log.i(TAG, "DYPlayerRenderImpl.setEnableVideoEnhance called: " + enable);
                 }
             });
 
@@ -368,7 +377,7 @@ public class AiStrengthenHook {
                     }
                     Object enhanceRender = XposedHelpers.getObjectField(param.thisObject, "m_enhanceRender");
                     if (enhanceRender == null) {
-                        Log.i(TAG, ">>> Auto-activating SGSR/CAS enhance pipeline on " + param.method.getName() + " arrival! <<<");
+                        DouyuLog.d(TAG, "Auto-activating SGSR/CAS enhance pipeline on " + param.method.getName());
                         XposedHelpers.callMethod(param.thisObject, "setEnableVideoEnhance", true);
                     }
                 }
@@ -378,17 +387,20 @@ public class AiStrengthenHook {
             for (java.lang.reflect.Method m : renderImplCls.getDeclaredMethods()) {
                 if (("onFrame".equals(m.getName()) || "onYuvFrame".equals(m.getName())) && m.getParameterTypes().length == 1) {
                     de.robv.android.xposed.XposedBridge.hookMethod(m, frameArrivalHook);
-                    Log.i(TAG, "✓ Hooked DYPlayerRenderImpl." + m.getName() + " for enhance auto-activation!");
                     hookedAny = true;
                 }
             }
 
             if (!hookedAny) {
                 Log.w(TAG, "Could not find onFrame or onYuvFrame method in DYPlayerRenderImpl");
+            } else {
+                hookedTargets++;
             }
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook DYPlayerRenderImpl / DYEnhanceRender", t);
         }
+
+        Log.i(TAG, "Hooked AiStrengthen (" + hookedTargets + "/7 targets)");
     }
 
     /**
@@ -605,7 +617,7 @@ public class AiStrengthenHook {
                 parentGroup.addView(wrapper, idx);
             }
 
-            Log.i(TAG, "✓ Successfully injected video enhance level SeekBar into definition panel!");
+            DouyuLog.d(TAG, "Injected video enhance level SeekBar into definition panel");
         } catch (Throwable t) {
             Log.w(TAG, "Failed to customize definition panel UI in setupEnhanceSlider", t);
         }
@@ -630,12 +642,12 @@ public class AiStrengthenHook {
         if (render != null) {
             try {
                 XposedHelpers.callMethod(render, "setVideoEnhanceLevel", level);
-                Log.i(TAG, "Realtime applied videoEnhanceLevel: " + level);
+                DouyuLog.d(TAG, "Realtime applied videoEnhanceLevel: " + level);
             } catch (Throwable t) {
                 Log.w(TAG, "Failed to call setVideoEnhanceLevel realtime", t);
             }
         } else {
-            Log.i(TAG, "Saved videoEnhanceLevel: " + level + " (render not yet initialized, will apply on init)");
+            DouyuLog.d(TAG, "Saved videoEnhanceLevel: " + level + " (will apply on init)");
         }
     }
 

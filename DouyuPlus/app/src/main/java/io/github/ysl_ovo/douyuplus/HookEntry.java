@@ -62,7 +62,7 @@ public class HookEntry implements IXposedHookLoadPackage {
 
         // 非主进程仅挂载后台服务拦截，跳过主界面与播放器 UI Hook
         if (lpparam.processName != null && !TARGET_PACKAGE.equals(lpparam.processName)) {
-            Log.i(TAG, "Skipping UI/Player hooks in sub-process: " + lpparam.processName);
+            DouyuLog.d(TAG, "Skipping UI/Player hooks in sub-process: " + lpparam.processName);
             return;
         }
 

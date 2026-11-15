@@ -49,7 +49,6 @@ public class DanmuSuffixHook {
                                             suffix += ZERO_WIDTH_CHARS[RANDOM.nextInt(ZERO_WIDTH_CHARS.length)];
                                         }
                                         map.put("content", original + suffix);
-                                        Log.d(TAG, "Appended zero-width suffix to: " + original);
                                     }
                                 }
                             } catch (Throwable t) {
@@ -58,11 +57,12 @@ public class DanmuSuffixHook {
                         }
                     });
                     hookedCount++;
-                    Log.i(TAG, "Hooked JniDanmu send method: " + m.getName());
                 }
             }
             if (hookedCount == 0) {
                 Log.w(TAG, "No matching send method found in JniDanmu");
+            } else {
+                Log.i(TAG, "Hooked JniDanmu send methods (" + hookedCount + ")");
             }
         } catch (Throwable t) {
             Log.e(TAG, "Failed to hook JniDanmu", t);

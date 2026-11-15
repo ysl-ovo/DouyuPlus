@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
+import io.github.ysl_ovo.douyuplus.DouyuLog;
 import io.github.ysl_ovo.douyuplus.DouyuPlusConfig;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XC_MethodReplacement;
@@ -38,6 +39,8 @@ public class PadModeHook {
     private static long sGlobalLastRecreateTime = 0L;
 
     public static void hook(final XC_LoadPackage.LoadPackageParam lpparam) {
+        int hookedTargets = 0;
+
         // 0. 禁用 enableRecreateOnWidthChange：彻底禁止 Activity 在屏幕宽度变化时调用 recreate() 自我销毁重建
         String[] soraClasses = new String[]{
                 "com.douyu.module.base.SoraActivity",
@@ -64,7 +67,7 @@ public class PadModeHook {
 
                     // 启动中转 Activity (Launcher / Splash) 绝对不准自我重建！
                     if (actName.contains("LauncherActivity")) {
-                        Log.i(TAG, "Activity.recreate permanently blocked for launcher: " + actName);
+                        DouyuLog.d(TAG, "Activity.recreate permanently blocked for launcher: " + actName);
                         param.setResult(null);
                         return;
                     }
@@ -73,21 +76,21 @@ public class PadModeHook {
                     // 1. 冷启动前 10000ms 内，全面硬核拦截任何 Activity 销毁重建！
                     long timeSinceStart = now - APP_START_TIME;
                     if (timeSinceStart < 10000L) {
-                        Log.i(TAG, "Activity.recreate suppressed during cold launch window: " + act.getClass().getSimpleName() + " (" + timeSinceStart + "ms)");
+                        DouyuLog.d(TAG, "Activity.recreate suppressed during cold launch window: " + act.getClass().getSimpleName() + " (" + timeSinceStart + "ms)");
                         param.setResult(null);
                         return;
                     }
 
                     // 2. 全局（跨任何实例）3000ms 严格防抖
                     if (now - sGlobalLastRecreateTime < 3000L) {
-                        Log.i(TAG, "Activity.recreate suppressed by global debounce: " + act.getClass().getSimpleName() + " (" + (now - sGlobalLastRecreateTime) + "ms)");
+                        DouyuLog.d(TAG, "Activity.recreate suppressed by global debounce: " + act.getClass().getSimpleName() + " (" + (now - sGlobalLastRecreateTime) + "ms)");
                         param.setResult(null);
                         return;
                     }
                     sGlobalLastRecreateTime = now;
                 }
             });
-            Log.i(TAG, "Hooked Activity.recreate with global cold launch protection");
+            hookedTargets++;
         } catch (Throwable ignored) {}
 
         // 0c. Hook MainActivity.onConfigurationChanged：屏蔽由 uiMode 或屏幕旋转引起的内置 recreate()
@@ -215,7 +218,7 @@ public class PadModeHook {
                 });
             } catch (Throwable ignored) {}
 
-            Log.i(TAG, "Hooked DYWideScreenUtilKt for Pad mode");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook DYWideScreenUtilKt", t);
         }
@@ -380,7 +383,7 @@ public class PadModeHook {
                     }
                 }
             });
-            Log.i(TAG, "Hooked WideActivityStyle.h & l -> full width on Pad mode");
+            hookedTargets++;
         } catch (Throwable ignored) {}
 
         // 6. Hook RamboPlayerActivity.MB / WB / OB / yB: 平板横屏直入直播间时隐藏竖屏专用层 (mLivePortraitView / jhk / fjb)
@@ -437,7 +440,7 @@ public class PadModeHook {
                     }
                 }
             });
-            Log.i(TAG, "Hooked RamboPlayerActivity -> hide portrait layers (mLivePortraitView/fjb) in landscape");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook RamboPlayerActivity for Pad mode", t);
         }
@@ -478,7 +481,7 @@ public class PadModeHook {
                     }
                 }
             });
-            Log.i(TAG, "Hooked ListChatViewNeuron -> disabled floating portrait chat box (fjb) in Pad landscape");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook ListChatViewNeuron for Pad mode", t);
         }
@@ -642,6 +645,8 @@ public class PadModeHook {
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook Activity for Pad mode", t);
         }
+
+        Log.i(TAG, "Hooked PadMode (" + hookedTargets + "/5 targets)");
     }
 
     private static void applyPadConfiguration(Context context) {

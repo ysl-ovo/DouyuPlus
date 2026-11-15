@@ -20,6 +20,8 @@ import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
+import io.github.ysl_ovo.douyuplus.BuildConfig;
+import io.github.ysl_ovo.douyuplus.DouyuLog;
 import io.github.ysl_ovo.douyuplus.DouyuPlusConfig;
 import io.github.ysl_ovo.douyuplus.TestRunner;
 import io.github.ysl_ovo.douyuplus.views.DouyuPlusIconDrawable;
@@ -254,7 +256,7 @@ public class SettingsHook {
         });
 
         container.addView(plusBtn);
-        Log.i(TAG, "Successfully injected DouyuPlus settings icon into '我的' topbar (to the right of sign-in)!");
+        DouyuLog.d(TAG, "Injected DouyuPlus settings icon into '我的' topbar");
     }
 
     private static void updateTopBarEntryTheme(final Object topBarObj, final ClassLoader classLoader) {
@@ -342,7 +344,7 @@ public class SettingsHook {
                             lp.topMargin = (int) (8 * density);
                             lp.bottomMargin = (int) (8 * density);
                             container.addView(entryView, 0, lp);
-                            Log.i(TAG, "Injected DouyuPlus settings entry into SetupActivity");
+                            DouyuLog.d(TAG, "Injected DouyuPlus settings entry into SetupActivity");
                         }
                     } catch (Throwable t) {
                         Log.w(TAG, "Failed to inject DouyuPlus entry view into SetupActivity", t);
@@ -488,6 +490,13 @@ public class SettingsHook {
         // 10. 自动最高画质切换 (支持 WiFi / 任何网络环境 + 手动切换豁免)
         addAutoQualityRow(activity, root);
 
+        // 10b. 进房自动切换备用线路 (独立于自动画质，避开默认主线并按权重切换非 RTC 备用线路)
+        addSwitchRow(activity, root,
+                "进房自动切换备用线路",
+                "进入直播间时自动避开默认主线，按权重优先切换至一条非默认、非 RTC 的备用线路（独立配置，不随切画质重切）",
+                DouyuPlusConfig.KEY_AUTO_SWITCH_LINE,
+                DouyuPlusConfig.DEFAULT_AUTO_SWITCH_LINE);
+
         // 11. 去除底栏中间「+」号按钮 (默认去除)
         addSwitchRow(
                 activity,
@@ -518,7 +527,7 @@ public class SettingsHook {
                 activity,
                 android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
         );
-        builder.setTitle("斗鱼Plus (DouyuPlus) 设置");
+        builder.setTitle("斗鱼Plus 设置 v" + BuildConfig.VERSION_NAME);
         builder.setView(scrollView);
         builder.setPositiveButton("保存并重启应用生效", new DialogInterface.OnClickListener() {
             @Override

@@ -26,6 +26,8 @@ public class DanmuCleanHook {
     private static final String TAG = "DouyuPlus_DanmuClean";
 
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
+        int hookedTargets = 0;
+
         // 1. 拦截 SpecialDanmakuNeuron.EE(DanmukuBean) -> return false
         // 防止全屏弹幕被特殊弹幕管道捕获，强制回退为普通文本弹幕
         try {
@@ -33,12 +35,14 @@ public class DanmuCleanHook {
                     "tv.douyu.liveplayer.innerlayer.landscape.danma.SpecialDanmakuNeuron",
                     lpparam.classLoader
             );
+            boolean hooked = false;
             for (Method m : specialDanmakuNeuronCls.getDeclaredMethods()) {
                 if (m.getName().equals("EE") && m.getReturnType() == boolean.class) {
                     XposedBridge.hookMethod(m, XC_MethodReplacement.returnConstant(false));
-                    Log.i(TAG, "Hooked SpecialDanmakuNeuron.EE -> return false");
+                    hooked = true;
                 }
             }
+            if (hooked) hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook SpecialDanmakuNeuron", t);
         }
@@ -49,12 +53,14 @@ public class DanmuCleanHook {
                     "tv.douyu.liveplayer.innerlayer.landscape.layer.LPLandSpecialDanmakuLayer",
                     lpparam.classLoader
             );
+            boolean hooked = false;
             for (Method m : landSpecialLayerCls.getDeclaredMethods()) {
                 if ((m.getName().equals("q") || m.getName().equals("k")) && m.getReturnType() == boolean.class) {
                     XposedBridge.hookMethod(m, XC_MethodReplacement.returnConstant(false));
-                    Log.i(TAG, "Hooked LPLandSpecialDanmakuLayer." + m.getName() + " -> return false");
+                    hooked = true;
                 }
             }
+            if (hooked) hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook LPLandSpecialDanmakuLayer", t);
         }
@@ -73,7 +79,7 @@ public class DanmuCleanHook {
                     XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
                 }
             }
-            Log.i(TAG, "Hooked LPSpecialDanmuLayout render methods -> DO_NOTHING");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook LPSpecialDanmuLayout", t);
         }
@@ -84,12 +90,14 @@ public class DanmuCleanHook {
                     "tv.douyu.liveplayer.innerlayer.landscape.customdanmu.skin.LPSkinDanmakuEmitter",
                     lpparam.classLoader
             );
+            boolean hooked = false;
             for (Method m : skinEmitterCls.getDeclaredMethods()) {
                 if (m.getName().equals("m") && m.getReturnType() == String.class) {
                     XposedBridge.hookMethod(m, XC_MethodReplacement.returnConstant(""));
-                    Log.i(TAG, "Hooked LPSkinDanmakuEmitter.m -> return \"\"");
+                    hooked = true;
                 }
             }
+            if (hooked) hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook LPSkinDanmakuEmitter", t);
         }
@@ -112,14 +120,16 @@ public class DanmuCleanHook {
                     "tv.douyu.liveplayer.innerlayer.landscape.customdanmu.base.CustomDanmakuManager",
                     lpparam.classLoader
             );
+            boolean hooked = false;
             for (Method m : customDanmakuMgrCls.getDeclaredMethods()) {
                 if (m.getReturnType() == boolean.class && m.getParameterTypes().length == 1) {
                     if (m.getName().equals("l") || m.getName().equals("a")) {
                         XposedBridge.hookMethod(m, XC_MethodReplacement.returnConstant(false));
-                        Log.i(TAG, "Hooked CustomDanmakuManager." + m.getName() + " -> return false");
+                        hooked = true;
                     }
                 }
             }
+            if (hooked) hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook CustomDanmakuManager", t);
         }
@@ -130,16 +140,18 @@ public class DanmuCleanHook {
                     "tv.douyu.liveplayer.utils.DanmaPrefixUtils$Companion",
                     lpparam.classLoader
             );
+            boolean hooked = false;
             for (Method m : prefixCompanionCls.getDeclaredMethods()) {
                 if (m.getName().equals("c") && m.getParameterTypes().length == 2) {
                     XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
-                    Log.i(TAG, "Hooked DanmaPrefixUtils$Companion.c -> DO_NOTHING");
+                    hooked = true;
                 } else if ((m.getName().equals("g") || m.getName().equals("h")) && m.getReturnType() == String.class) {
                     XposedBridge.hookMethod(m, XC_MethodReplacement.returnConstant(null));
                 } else if (m.getName().equals("a") && m.getParameterTypes().length >= 4) {
                     XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
                 }
             }
+            if (hooked) hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook DanmaPrefixUtils$Companion", t);
         }
@@ -190,7 +202,7 @@ public class DanmuCleanHook {
             XposedHelpers.findAndHookMethod(danmukuBeanCls, "isSupremeFloatDanmaku", XC_MethodReplacement.returnConstant(false));
             XposedHelpers.findAndHookMethod(danmukuBeanCls, "isNoble", XC_MethodReplacement.returnConstant(false));
             XposedHelpers.findAndHookMethod(danmukuBeanCls, "getNobleLevel", XC_MethodReplacement.returnConstant(0));
-            Log.i(TAG, "Hooked DanmukuBean methods & constructors to strip all skins/effects");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook DanmukuBean", t);
         }
@@ -206,6 +218,7 @@ public class DanmuCleanHook {
                     XposedBridge.hookMethod(m, XC_MethodReplacement.returnConstant(null));
                 }
             }
+            hookedTargets++;
         } catch (Throwable ignored) {}
 
         // 9. 移除自身边框高亮
@@ -230,6 +243,9 @@ public class DanmuCleanHook {
                     });
                 }
             }
+            hookedTargets++;
         } catch (Throwable ignored) {}
+
+        Log.i(TAG, "Hooked DanmuClean (" + hookedTargets + "/9 targets)");
     }
 }

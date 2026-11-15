@@ -31,8 +31,6 @@ public class AddOneHook {
                     }
                 }
             });
-            Log.i(TAG, "Successfully hooked OptFunBean.b (CD Bypass)");
-
             // 2. 动态 Hook 子类 concrete a() 方法保证 +1 按钮常显（每个子类仅 Hook 一次）
             XposedBridge.hookAllConstructors(optFunBeanCls, new XC_MethodHook() {
                 @Override
@@ -54,7 +52,7 @@ public class AddOneHook {
                     }
                 }
             });
-            Log.i(TAG, "Successfully hooked OptFunBean constructors for concrete a() visibility");
+            Log.i(TAG, "Hooked OptFunBean (CD bypass + concrete a() visibility)");
 
         } catch (Throwable t) {
             Log.e(TAG, "Failed to hook OptFunBean", t);

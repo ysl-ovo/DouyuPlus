@@ -12,6 +12,7 @@ import de.robv.android.xposed.XC_MethodReplacement;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import io.github.ysl_ovo.douyuplus.DouyuLog;
 import io.github.ysl_ovo.douyuplus.DouyuPlusConfig;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -26,9 +27,11 @@ import java.util.List;
  */
 public class HomeTabHook {
     private static final String TAG = "DouyuPlus_HomeTab";
+    private static volatile boolean sRestoringFollowSort = false;
 
     public static void hook(final XC_LoadPackage.LoadPackageParam lpparam) {
         final boolean enableFollowTab = DouyuPlusConfig.isHomeFollowTabEnabled();
+        int hookedTargets = 0;
 
         // 1. Hook BottomTabDataSourceUtil: 修改数据源配置中的 Tab 名称为“关注”
         if (enableFollowTab) {
@@ -49,8 +52,11 @@ public class HomeTabHook {
                                     for (Object item : confList) {
                                         String type = (String) XposedHelpers.getObjectField(item, "type");
                                         if ("fun".equals(type)) {
-                                            XposedHelpers.setObjectField(item, "name", "关注");
-                                            Log.i(TAG, "BottomTabDataSourceUtil: Changed tab 'fun' name to '关注'");
+                                            Object oldName = XposedHelpers.getObjectField(item, "name");
+                                            if (!"关注".equals(oldName)) {
+                                                XposedHelpers.setObjectField(item, "name", "关注");
+                                                DouyuLog.d(TAG, "BottomTabDataSourceUtil: Changed tab 'fun' name to '关注'");
+                                            }
                                         }
                                     }
                                 }
@@ -61,11 +67,14 @@ public class HomeTabHook {
                     }
                 };
 
+                boolean hooked = false;
                 for (Method m : tabDataUtilCls.getDeclaredMethods()) {
                     if (m.getName().equals("a") || m.getName().equals("d")) {
                         XposedBridge.hookMethod(m, configHook);
+                        hooked = true;
                     }
                 }
+                if (hooked) hookedTargets++;
             } catch (Throwable t) {
                 Log.w(TAG, "Failed to hook BottomTabDataSourceUtil", t);
             }
@@ -95,12 +104,12 @@ public class HomeTabHook {
                                 Object followFragment = createFollowFragment(lpparam.classLoader);
                                 if (followFragment != null) {
                                     XposedHelpers.setObjectField(bean, "mFragment", followFragment);
-                                    Log.i(TAG, "Successfully replaced Tab 2 (Entertainment) with MyFollowTabFragment!");
+                                    DouyuLog.d(TAG, "Replaced Tab 2 (Entertainment) with MyFollowTabFragment");
                                 }
                             }
                         }
                     });
-                    Log.i(TAG, "Hooked BottomTabFactory.a");
+                    hookedTargets++;
                 } else if (m.getName().equals("b") && m.getParameterTypes().length == 0) {
                     // Hook b: 当开启去除底栏+号时，从返回的 BottomTabBean 列表中移除 send 项
                     XposedBridge.hookMethod(m, new XC_MethodHook() {
@@ -115,14 +124,14 @@ public class HomeTabHook {
                                         String type = (String) XposedHelpers.getObjectField(bean, "type");
                                         if ("send".equals(type)) {
                                             it.remove();
-                                            Log.i(TAG, "BottomTabFactory.b: Removed '+' (send) button from BottomTabBeans");
+                                            DouyuLog.d(TAG, "BottomTabFactory.b: Removed '+' button from BottomTabBeans");
                                         }
                                     }
                                 }
                             }
                         }
                     });
-                    Log.i(TAG, "Hooked BottomTabFactory.b");
+                    hookedTargets++;
                 }
             }
         } catch (Throwable t) {
@@ -146,7 +155,7 @@ public class HomeTabHook {
                             }
                         }
                     });
-                    Log.i(TAG, "Hooked BottomTabBar.d");
+                    hookedTargets++;
                 }
             }
         } catch (Throwable t) {
@@ -170,12 +179,12 @@ public class HomeTabHook {
                                 int curArg = (Integer) param.args[0];
                                 if (curArg == 0) {
                                     param.args[0] = defaultPage;
-                                    Log.i(TAG, "MainFragment.OB: Overriding start page from 0 to " + defaultPage);
+                                    DouyuLog.d(TAG, "MainFragment.OB: Overriding start page from 0 to " + defaultPage);
                                 }
                             }
                         }
                     });
-                    Log.i(TAG, "Hooked MainFragment.OB");
+                    hookedTargets++;
                 }
             }
 
@@ -194,7 +203,7 @@ public class HomeTabHook {
                                         int curG = XposedHelpers.getIntField(param.thisObject, "g");
                                         if (curG == 0) {
                                             XposedHelpers.setIntField(param.thisObject, "g", defaultPage);
-                                            Log.i(TAG, "MainFragment.onViewCreated: Overriding g to " + defaultPage);
+                                            DouyuLog.d(TAG, "MainFragment.onViewCreated: Overriding g to " + defaultPage);
                                         }
                                     } catch (Throwable ignored) {}
                                 }
@@ -202,49 +211,51 @@ public class HomeTabHook {
                         }
                     }
             );
-            Log.i(TAG, "Hooked MainFragment.onViewCreated for default start page");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook MainFragment start page", t);
         }
 
+        // 2b. 关注页自动记忆上次排序方式（不依赖底栏替换开关）
+        if (hookFollowSortPersistence(lpparam.classLoader)) {
+            hookedTargets++;
+        }
+
         if (!enableFollowTab) {
+            Log.i(TAG, "Hooked HomeTab (" + hookedTargets + " targets)");
             return;
         }
 
-        // 3. Hook MyFollowTabViewModel: 强制默认 Tab 位置为 1 (直播中)
-        try {
-            Class<?> vmCls = XposedHelpers.findClass(
-                    "com.douyu.module.follow.p.live.page.myfollow.MyFollowTabViewModel",
-                    lpparam.classLoader
-            );
-            for (Method m : vmCls.getDeclaredMethods()) {
-                if (m.getName().equals("G") && m.getParameterTypes().length == 2) {
-                    XposedBridge.hookMethod(m, new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            param.args[0] = 1; // 强制 defaultTab = 1 (直播中)
-                        }
-                    });
-                }
-            }
-        } catch (Throwable ignored) {}
-
-        // 4. Hook MyFollowTabFragment: 默认定位到「直播中」分栏 (index = 1)，并沉浸下沉搜索栏
+        // 4. Hook MyFollowTabFragment: 仅针对底栏替换的实例，默认定位到「直播中」分栏 (index = 1)，并沉浸下沉搜索栏
         try {
             final Class<?> myFollowTabCls = XposedHelpers.findClass(
                     "com.douyu.module.follow.p.live.page.myfollow.MyFollowTabFragment",
                     lpparam.classLoader
             );
 
-            // 强制 defaultSubTab = 1 (TAB_SUB_LIVE 直播中)
+            // 仅在底栏关注页中强制 defaultSubTab = 1 (TAB_SUB_LIVE 直播中)，不影响原关注页 FollowFansActivity
             try {
-                XposedHelpers.findAndHookMethod(myFollowTabCls, "hC", XC_MethodReplacement.returnConstant(1));
+                XposedHelpers.findAndHookMethod(myFollowTabCls, "hC", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (isBottomTabFollowFragment(param.thisObject, null)) {
+                            param.setResult(1);
+                        }
+                    }
+                });
             } catch (Throwable ignored) {}
 
             try {
                 for (Method m : myFollowTabCls.getDeclaredMethods()) {
                     if (m.getName().equals("eC") && m.getReturnType() == int.class) {
-                        XposedBridge.hookMethod(m, XC_MethodReplacement.returnConstant(1));
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                if (isBottomTabFollowFragment(param.thisObject, null)) {
+                                    param.setResult(1);
+                                }
+                            }
+                        });
                     }
                 }
             } catch (Throwable ignored) {}
@@ -259,6 +270,9 @@ public class HomeTabHook {
                         protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                             final Object fragment = param.thisObject;
                             final View root = (View) param.args[0];
+                            if (!isBottomTabFollowFragment(fragment, root)) {
+                                return;
+                            }
                             if (root != null) {
                                 Context ctx = root.getContext();
                                 boolean isDark = isNightMode(ctx, lpparam.classLoader);
@@ -312,7 +326,9 @@ public class HomeTabHook {
                 XposedHelpers.findAndHookMethod(myFollowTabCls, "onResume", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        switchToLiveSubTab(myFollowTabCls, param.thisObject);
+                        if (isBottomTabFollowFragment(param.thisObject, null)) {
+                            switchToLiveSubTab(myFollowTabCls, param.thisObject);
+                        }
                     }
                 });
             } catch (Throwable ignored) {}
@@ -322,14 +338,14 @@ public class HomeTabHook {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         boolean hidden = (Boolean) param.args[0];
-                        if (!hidden) {
+                        if (!hidden && isBottomTabFollowFragment(param.thisObject, null)) {
                             switchToLiveSubTab(myFollowTabCls, param.thisObject);
                         }
                     }
                 });
             } catch (Throwable ignored) {}
 
-            Log.i(TAG, "Hooked MyFollowTabFragment (default live tab + statusBar margin + white background)");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook MyFollowTabFragment", t);
         }
@@ -348,6 +364,9 @@ public class HomeTabHook {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                             View view = (View) param.args[0];
+                            if (!isBottomTabFollowFragment(param.thisObject, view)) {
+                                return;
+                            }
                             if (view != null) {
                                 boolean isDark = isNightMode(view.getContext(), lpparam.classLoader);
                                 view.setBackgroundColor(isDark ? 0xFF131313 : 0xFFFFFFFF);
@@ -376,6 +395,7 @@ public class HomeTabHook {
                     "com.douyu.module.home.utils.HomeProviderUtil",
                     lpparam.classLoader
             );
+            boolean hooked = false;
             for (Method m : homeProviderUtilCls.getDeclaredMethods()) {
                 if (m.getName().equals("A") && m.getParameterTypes().length == 1) {
                     XposedBridge.hookMethod(m, new XC_MethodHook() {
@@ -385,18 +405,21 @@ public class HomeTabHook {
                             if (fragment != null) {
                                 String name = fragment.getClass().getName();
                                 if (name.contains("MyFollowTabFragment") || name.contains("FollowFragment")) {
-                                    Log.i(TAG, "HomeProviderUtil.A intercepted for follow tab fragment: " + name);
+                                    DouyuLog.d(TAG, "HomeProviderUtil.A intercepted for follow tab fragment: " + name);
                                     refreshFollowTab(fragment);
                                 }
                             }
                         }
                     });
-                    Log.i(TAG, "Hooked HomeProviderUtil.A for follow tab repeat click");
+                    hooked = true;
                 }
             }
+            if (hooked) hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook HomeProviderUtil.A", t);
         }
+
+        Log.i(TAG, "Hooked HomeTab (" + hookedTargets + " targets)");
     }
 
     private static void switchToLiveSubTab(Class<?> myFollowTabCls, Object fragment) {
@@ -419,6 +442,90 @@ public class HomeTabHook {
         } catch (Throwable ignored) {}
     }
 
+    private static android.app.Activity resolveFragmentActivity(Object fragment, View root) {
+        if (fragment != null) {
+            try {
+                Object act = XposedHelpers.callMethod(fragment, "getActivity");
+                if (act instanceof android.app.Activity) {
+                    return (android.app.Activity) act;
+                }
+            } catch (Throwable ignored) {}
+        }
+        if (root != null) {
+            Context ctx = root.getContext();
+            while (ctx instanceof android.content.ContextWrapper) {
+                if (ctx instanceof android.app.Activity) {
+                    return (android.app.Activity) ctx;
+                }
+                ctx = ((android.content.ContextWrapper) ctx).getBaseContext();
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasBottomTabMarker(Object fragment) {
+        if (fragment == null) return false;
+        try {
+            Object argsObj = XposedHelpers.callMethod(fragment, "getArguments");
+            if (argsObj instanceof Bundle && ((Bundle) argsObj).getBoolean("douyuplus_bottom_follow_tab", false)) {
+                return true;
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    private static boolean isBottomTabFollowFragment(Object fragment, View root) {
+        android.app.Activity activity = resolveFragmentActivity(fragment, root);
+        if (activity != null) {
+            String actName = activity.getClass().getName();
+            if (actName.contains("FollowFansActivity")) {
+                return false;
+            }
+            if (actName.contains("MainActivity")) {
+                return true;
+            }
+        }
+        if (hasBottomTabMarker(fragment)) {
+            return true;
+        }
+        if (fragment != null) {
+            try {
+                Object parent = XposedHelpers.callMethod(fragment, "getParentFragment");
+                if (parent != null && hasBottomTabMarker(parent)) {
+                    return true;
+                }
+            } catch (Throwable ignored) {}
+        }
+        return false;
+    }
+
+    private static void setSortFieldSafe(Object vm, String obfuscatedField, int sortValue) {
+        if (vm == null) return;
+        try {
+            java.lang.reflect.Field field = XposedHelpers.findFieldIfExists(vm.getClass(), obfuscatedField);
+            if (field == null) {
+                field = XposedHelpers.findFieldIfExists(vm.getClass(), "currentSort");
+            }
+            if (field != null) {
+                field.setAccessible(true);
+                Class<?> t = field.getType();
+                if (t == int.class) {
+                    field.setInt(vm, sortValue);
+                } else if (t == Integer.class) {
+                    field.set(vm, Integer.valueOf(sortValue));
+                } else {
+                    Log.w(TAG, "Unexpected sort field type on " + vm.getClass().getName() + ": " + t.getName());
+                    return;
+                }
+                DouyuLog.d(TAG, "Restored follow sort " + sortValue + " on " + vm.getClass().getSimpleName() + "." + field.getName());
+            } else {
+                Log.w(TAG, "Sort field not found on " + vm.getClass().getName() + " (tried " + obfuscatedField + ", currentSort)");
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to restore sort field on " + vm.getClass().getName(), t);
+        }
+    }
+
     private static Object createFollowFragment(ClassLoader classLoader) {
         try {
             Class<?> myFollowTabCls = XposedHelpers.findClass(
@@ -428,8 +535,9 @@ public class HomeTabHook {
             Object fragment = myFollowTabCls.newInstance();
             Bundle bundle = new Bundle();
             bundle.putInt("default_sub_tab", 1);
+            bundle.putBoolean("douyuplus_bottom_follow_tab", true);
             XposedHelpers.callMethod(fragment, "setArguments", bundle);
-            Log.i(TAG, "Created MyFollowTabFragment with default_sub_tab = 1 (Live Tab)");
+            DouyuLog.d(TAG, "Created MyFollowTabFragment with default_sub_tab = 1");
             return fragment;
         } catch (Throwable t1) {
             Log.w(TAG, "MyFollowTabFragment creation failed, trying fallback", t1);
@@ -467,7 +575,7 @@ public class HomeTabHook {
         if (followTabFrag == null) return;
         long now = System.currentTimeMillis();
         if (now - sLastFollowRefreshTime < 800L) {
-            Log.i(TAG, "refreshFollowTab: ignored due to debounce (" + (now - sLastFollowRefreshTime) + "ms)");
+            DouyuLog.d(TAG, "refreshFollowTab: ignored due to debounce (" + (now - sLastFollowRefreshTime) + "ms)");
             return;
         }
         sLastFollowRefreshTime = now;
@@ -623,7 +731,7 @@ public class HomeTabHook {
             recyclerView = null;
         }
 
-        Log.i(TAG, "doTriggerRefresh: subFrag=" + (targetSubFrag != null ? targetSubFrag.getClass().getSimpleName() : "null")
+        DouyuLog.d(TAG, "doTriggerRefresh: subFrag=" + (targetSubFrag != null ? targetSubFrag.getClass().getSimpleName() : "null")
                 + ", refreshLayout=" + (refreshLayout != null ? refreshLayout.getClass().getSimpleName() : "null")
                 + ", recyclerView=" + (recyclerView != null ? recyclerView.getClass().getSimpleName() : "null"));
 
@@ -655,9 +763,9 @@ public class HomeTabHook {
 
                         if (!isRefreshing) {
                             XposedHelpers.callMethod(finalRefreshLayout, "autoRefresh");
-                            Log.i(TAG, "autoRefresh invoked successfully on " + finalRefreshLayout.getClass().getSimpleName());
+                            DouyuLog.d(TAG, "autoRefresh invoked successfully on " + finalRefreshLayout.getClass().getSimpleName());
                         } else {
-                            Log.i(TAG, "RefreshLayout is already refreshing, ignored");
+                            DouyuLog.d(TAG, "RefreshLayout is already refreshing, ignored");
                         }
                     } catch (Throwable t) {
                         Log.w(TAG, "Failed to call autoRefresh", t);
@@ -687,6 +795,122 @@ public class HomeTabHook {
                 View res = findViewByClassName(vg.getChildAt(i), className);
                 if (res != null) return res;
             }
+        }
+        return null;
+    }
+
+    /**
+     * 关注页（MyFollowTabFragment）自动记忆并恢复「全部」「直播中」两个分栏的上次排序方式。
+     */
+    private static boolean hookFollowSortPersistence(ClassLoader classLoader) {
+        try {
+            final Class<?> tabVmCls = XposedHelpers.findClassIfExists(
+                    "com.douyu.module.follow.p.live.page.myfollow.MyFollowTabViewModel",
+                    classLoader
+            );
+            final Class<?> sortEnumCls = XposedHelpers.findClassIfExists(
+                    "com.douyu.module.follow.p.live.page.myfollow.FollowSortType",
+                    classLoader
+            );
+            if (tabVmCls != null && sortEnumCls != null) {
+                XposedBridge.hookAllConstructors(tabVmCls, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        int allSort = DouyuPlusConfig.getFollowAllSort(null);
+                        int liveSort = DouyuPlusConfig.getFollowLiveSort(null);
+                        sRestoringFollowSort = true;
+                        try {
+                            if (allSort != DouyuPlusConfig.DEFAULT_FOLLOW_SORT) {
+                                Object allEnum = findFollowSortTypeByValue(sortEnumCls, allSort);
+                                if (allEnum != null) {
+                                    XposedHelpers.callMethod(param.thisObject, "L", 0, allEnum);
+                                }
+                            }
+                            if (liveSort != DouyuPlusConfig.DEFAULT_FOLLOW_SORT) {
+                                Object liveEnum = findFollowSortTypeByValue(sortEnumCls, liveSort);
+                                if (liveEnum != null) {
+                                    XposedHelpers.callMethod(param.thisObject, "L", 1, liveEnum);
+                                }
+                            }
+                        } finally {
+                            sRestoringFollowSort = false;
+                        }
+                    }
+                });
+
+                XposedHelpers.findAndHookMethod(tabVmCls, "L", int.class, sortEnumCls, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (sRestoringFollowSort || param.args == null || param.args.length < 2 || param.args[1] == null) {
+                            return;
+                        }
+                        int position = (int) param.args[0];
+                        int sortVal = (int) XposedHelpers.callMethod(param.args[1], "getValue");
+                        if (position == 0) {
+                            DouyuPlusConfig.setFollowAllSort(null, sortVal);
+                            DouyuLog.d(TAG, "Saved follow all-tab sort=" + sortVal);
+                        } else if (position == 1) {
+                            DouyuPlusConfig.setFollowLiveSort(null, sortVal);
+                            DouyuLog.d(TAG, "Saved follow live-tab sort=" + sortVal);
+                        }
+                    }
+                });
+            }
+
+            final Class<?> liveVmCls = XposedHelpers.findClassIfExists(
+                    "com.douyu.module.follow.p.live.page.myfollow.tab.LiveFollowTabViewModel",
+                    classLoader
+            );
+            if (liveVmCls != null) {
+                XposedBridge.hookAllConstructors(liveVmCls, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Context ctx = (param.args != null && param.args.length > 0 && param.args[0] instanceof Context)
+                                ? (Context) param.args[0] : null;
+                        int savedLiveSort = DouyuPlusConfig.getFollowLiveSort(ctx);
+                        if (savedLiveSort != DouyuPlusConfig.DEFAULT_FOLLOW_SORT) {
+                            setSortFieldSafe(param.thisObject, "l", savedLiveSort);
+                        }
+                    }
+                });
+            }
+
+            final Class<?> allVmCls = XposedHelpers.findClassIfExists(
+                    "com.douyu.module.follow.p.live.page.myfollow.tab.AllFollowViewModel",
+                    classLoader
+            );
+            if (allVmCls != null) {
+                XposedBridge.hookAllConstructors(allVmCls, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Context ctx = (param.args != null && param.args.length > 0 && param.args[0] instanceof Context)
+                                ? (Context) param.args[0] : null;
+                        int savedAllSort = DouyuPlusConfig.getFollowAllSort(ctx);
+                        if (savedAllSort != DouyuPlusConfig.DEFAULT_FOLLOW_SORT) {
+                            setSortFieldSafe(param.thisObject, "i", savedAllSort);
+                        }
+                    }
+                });
+            }
+
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "Failed to hook follow sort persistence", t);
+            return false;
+        }
+    }
+
+    private static Object findFollowSortTypeByValue(Class<?> sortEnumCls, int targetValue) {
+        if (sortEnumCls == null) return null;
+        Object[] constants = sortEnumCls.getEnumConstants();
+        if (constants == null) return null;
+        for (Object c : constants) {
+            try {
+                int v = (int) XposedHelpers.callMethod(c, "getValue");
+                if (v == targetValue) {
+                    return c;
+                }
+            } catch (Throwable ignored) {}
         }
         return null;
     }

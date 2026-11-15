@@ -12,6 +12,7 @@ import de.robv.android.xposed.XC_MethodReplacement;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import io.github.ysl_ovo.douyuplus.DouyuLog;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -30,8 +31,13 @@ import java.util.Set;
  */
 public class AdBlockHook {
     private static final String TAG = "DouyuPlus_AdBlock";
+    private static int sHookedRules = 0;
+    private static int sDisabledViews = 0;
 
     public static void hook(final XC_LoadPackage.LoadPackageParam lpparam) {
+        sHookedRules = 0;
+        sDisabledViews = 0;
+
         // 1. 冷启动开屏广告：设置官方 show_ad = false 白名单标志，直接秒进主页
         try {
             Class<?> launcherCls = XposedHelpers.findClass("tv.douyu.view.activity.launcher.DYLauncherActivity", lpparam.classLoader);
@@ -42,10 +48,11 @@ public class AdBlockHook {
                     Intent intent = activity.getIntent();
                     if (intent != null) {
                         intent.putExtra("show_ad", false);
-                        Log.i(TAG, "DYLauncherActivity: forced show_ad = false (Instant Launch)");
+                        DouyuLog.d(TAG, "DYLauncherActivity: forced show_ad = false (Instant Launch)");
                     }
                 }
             });
+            sHookedRules++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook DYLauncherActivity", t);
         }
@@ -57,9 +64,10 @@ public class AdBlockHook {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     ((Activity) param.thisObject).finish();
-                    Log.i(TAG, "HotStartSplashActivity auto-finished");
+                    DouyuLog.d(TAG, "HotStartSplashActivity auto-finished");
                 }
             });
+            sHookedRules++;
         } catch (Throwable ignored) {}
 
         try {
@@ -82,7 +90,7 @@ public class AdBlockHook {
                     XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
                 }
             }
-            Log.i(TAG, "Hooked DanmuAdNeuron");
+            sHookedRules++;
         } catch (Throwable ignored) {}
 
         // 4. 业务横幅与悬浮广告：拦截 MADProvider
@@ -114,13 +122,15 @@ public class AdBlockHook {
             }
         } catch (Throwable ignored) {}
 
-        hookViewToGone(lpparam, "com.douyu.module.player.p.livebanner.LiveBannerView");
-        hookViewToGone(lpparam, "com.douyu.module.player.p.livebanner.LiveBannerWidget");
+        hookViewToGone(lpparam, "com.douyu.sdk.livebanner.widget.LiveBannerLayout");
 
         // 6. 彻底铲除中插劣质游戏卡片广告 (AdMidRollNeuron, AdMidRollView)
         hookAdMidRoll(lpparam);
 
-        // 7. 彻底拔除星海带货与弹幕卡片广告（劣质游戏卡片推广如烈焰觉醒、底栏粉色小手提袋）
+        // 7. 彻底拔除竖屏视频下方与弹幕区之间的屏下横幅及推广广告
+        hookPortraitUnderScreenBannerAds(lpparam);
+
+        // 8. 彻底拔除星海带货与弹幕卡片广告（劣质游戏卡片推广如烈焰觉醒、底栏粉色小手提袋）
         hookAnimatedAdAndDanmuCard(lpparam);
 
         // 8. 彻底铲除新版斗鱼小店带货系统（底栏粉色小手提袋、商品气泡：RamboShoppingNeuron / RamboNewShoppingViewController）
@@ -149,6 +159,8 @@ public class AdBlockHook {
 
         // 16. 彻底铲除发现页（推荐流）、动态页等信息流广告卡片
         hookFeedAds(lpparam);
+
+        Log.i(TAG, "Hooked AdBlock (" + sHookedRules + " rules, " + sDisabledViews + " views disabled)");
     }
 
     /**
@@ -184,7 +196,7 @@ public class AdBlockHook {
 
             XposedHelpers.findAndHookMethod(bizSwitchCls, "i", bizKeyCls, switchHook);
             XposedHelpers.findAndHookMethod(bizSwitchCls, "j", bizKeyCls, boolean.class, switchHook);
-            Log.i(TAG, "Hooked LiveRoomBizSwitch -> disabled ACCOMPANY, protected RAMBO_BOTTOM_FUNCTION");
+            sHookedRules++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook LiveRoomBizSwitch for voice accompany", t);
         }
@@ -201,7 +213,7 @@ public class AdBlockHook {
                     XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
                 }
             }
-            Log.i(TAG, "Hooked AudioPendantNeuron -> blocked voice accompany RN container");
+            sHookedRules++;
         } catch (Throwable ignored) {}
 
         // 3. 拦截 AudioVAFloatPresenter (语音厅悬浮球/浮窗业务逻辑调度)
@@ -213,7 +225,7 @@ public class AdBlockHook {
             for (Method m : presenterCls.getDeclaredMethods()) {
                 XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
             }
-            Log.i(TAG, "Hooked AudioVAFloatPresenter -> disabled float popup");
+            sHookedRules++;
         } catch (Throwable ignored) {}
 
         // 4. 拦截 VAPendantManager (右侧语音厅活动大挂件)
@@ -228,7 +240,7 @@ public class AdBlockHook {
                     XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
                 }
             }
-            Log.i(TAG, "Hooked VAPendantManager -> disabled entry");
+            sHookedRules++;
         } catch (Throwable ignored) {}
 
         // 5. 拦截 VAFloatView 业务弹窗触发 yb 方法
@@ -297,7 +309,7 @@ public class AdBlockHook {
                 }
             });
 
-            Log.i(TAG, "Hooked InputFrameView -> keep right buttons container visible");
+            sHookedRules++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook InputFrameView", t);
         }
@@ -355,7 +367,7 @@ public class AdBlockHook {
                 }
             });
 
-            Log.i(TAG, "Restored and stabilized IFOutsideGiftFunction (Yellow Gift Box)");
+            sHookedRules++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook IFOutsideGiftFunction", t);
         }
@@ -376,7 +388,7 @@ public class AdBlockHook {
                 }
             });
 
-            Log.i(TAG, "Restored and stabilized IFInteractiveEntrancesFunction (Interactive 4-Squares)");
+            sHookedRules++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook IFInteractiveEntrancesFunction", t);
         }
@@ -397,7 +409,7 @@ public class AdBlockHook {
                 }
             });
 
-            Log.i(TAG, "Restored and stabilized IFConvenientFunction (Quick Danmu)");
+            sHookedRules++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook IFConvenientFunction", t);
         }
@@ -419,7 +431,7 @@ public class AdBlockHook {
                     } catch (Throwable ignored) {}
                 }
             });
-            Log.i(TAG, "Hooked ConvenientRamboPortraitFunctionBiz -> permanent quick danmu icon");
+            sHookedRules++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook ConvenientRamboPortraitFunctionBiz", t);
         }
@@ -466,7 +478,7 @@ public class AdBlockHook {
                                         }
                                         XposedHelpers.callMethod(n, "a", giftView);
                                         giftView.setVisibility(View.VISIBLE);
-                                        Log.i(TAG, "Ensured OutsideGiftEntranceView attached to MultiFuncEntranceView");
+                                        DouyuLog.d(TAG, "Ensured OutsideGiftEntranceView attached to MultiFuncEntranceView");
                                     }
                                 }
                             }
@@ -499,7 +511,7 @@ public class AdBlockHook {
                     XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
                 }
             }
-            Log.i(TAG, "Hooked AdMidRollNeuron -> blocked ad requests");
+            sHookedRules++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook AdMidRollNeuron", t);
         }
@@ -517,7 +529,7 @@ public class AdBlockHook {
                     XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
                 }
             }
-            Log.i(TAG, "Disabled PtgAdSdk.init");
+            sHookedRules++;
         } catch (Throwable ignored) {}
 
         // 2. 禁用 PtgAdProxy 的所有广告拉取
@@ -526,7 +538,7 @@ public class AdBlockHook {
             for (Method m : proxyCls.getDeclaredMethods()) {
                 XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
             }
-            Log.i(TAG, "Disabled PtgAdProxy all ad fetch methods");
+            sHookedRules++;
         } catch (Throwable ignored) {}
 
         // 3. 拦截 MpNativeAdLoader & MpBannerAdLoader (斗鱼 SDK 广告加载器)
@@ -704,13 +716,263 @@ public class AdBlockHook {
                 }
             }
         } catch (Throwable ignored) {}
-
-        Log.i(TAG, "Permanently disabled ActiveEntry / Partition / RnSmall pendant views");
     }
 
     /**
      * 弹幕卡片广告与星海带货拦截
      */
+    private static void collapseAdView(final android.view.View view) {
+        if (view == null) {
+            return;
+        }
+        view.setVisibility(android.view.View.GONE);
+        android.view.ViewGroup.LayoutParams lp = view.getLayoutParams();
+        if (lp != null && lp.height != 0) {
+            lp.height = 0;
+            view.setLayoutParams(lp);
+        }
+    }
+
+    private static void hookMethodByRule(
+            final XC_LoadPackage.LoadPackageParam lpparam,
+            final String className,
+            final String[] methodNames,
+            final int[] paramCounts,
+            final boolean returnFalse) {
+        try {
+            Class<?> cls = XposedHelpers.findClass(className, lpparam.classLoader);
+            boolean hooked = false;
+            for (Method m : cls.getDeclaredMethods()) {
+                Class<?>[] pTypes = m.getParameterTypes();
+                for (int i = 0; i < methodNames.length; i++) {
+                    if (!m.getName().equals(methodNames[i]) || pTypes.length != paramCounts[i]) {
+                        continue;
+                    }
+                    if (returnFalse) {
+                        if (m.getReturnType() == boolean.class) {
+                            XposedBridge.hookMethod(m, XC_MethodReplacement.returnConstant(false));
+                            hooked = true;
+                        }
+                    } else if (m.getReturnType() == void.class) {
+                        XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
+                        hooked = true;
+                    }
+                }
+            }
+            if (hooked) {
+                sHookedRules++;
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static void hookPortraitUnderScreenBannerAds(final XC_LoadPackage.LoadPackageParam lpparam) {
+        // 7a. 竖屏屏下星海/新游/闲时广告容器 (RamboXHAnimatedAdCompatNeuron, 保留 mPkBarAndAdContainer 及 PK 条)
+        try {
+            final Class<?> compatCls = XposedHelpers.findClass(
+                    "com.douyu.module.player.p.rambobase.papi.RamboXHAnimatedAdCompatNeuron",
+                    lpparam.classLoader);
+            boolean hooked = false;
+            for (Method m : compatCls.getDeclaredMethods()) {
+                String name = m.getName();
+                Class<?>[] pTypes = m.getParameterTypes();
+                if (name.equals("Ol") && pTypes.length == 1 && m.getReturnType() == void.class) {
+                    XposedBridge.hookMethod(m, new de.robv.android.xposed.XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            if (param.args != null && param.args.length > 0 && param.args[0] instanceof android.view.View) {
+                                collapseAdView(((android.view.View) param.args[0]).findViewById(2131375830));
+                            }
+                        }
+                    });
+                    hooked = true;
+                } else if (name.equals("SE") && pTypes.length == 1 && m.getReturnType() == boolean.class) {
+                    XposedBridge.hookMethod(m, new XC_MethodReplacement() {
+                        @Override
+                        protected Object replaceHookedMethod(MethodHookParam param) {
+                            try {
+                                Object act = XposedHelpers.callMethod(param.thisObject, "lE");
+                                if (act instanceof android.app.Activity) {
+                                    collapseAdView(((android.app.Activity) act).findViewById(2131375830));
+                                }
+                            } catch (Throwable ignored) {}
+                            return false;
+                        }
+                    });
+                    hooked = true;
+                } else if (name.equals("FE") && pTypes.length == 1 && m.getReturnType() == boolean.class) {
+                    XposedBridge.hookMethod(m, XC_MethodReplacement.returnConstant(false));
+                    hooked = true;
+                } else if ((name.equals("TE") || name.equals("QE")) && pTypes.length == 0 && m.getReturnType() == void.class) {
+                    XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
+                    hooked = true;
+                } else if (name.equals("WE") && pTypes.length == 1 && pTypes[0] == int.class && m.getReturnType() == void.class) {
+                    XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
+                    hooked = true;
+                }
+            }
+            if (hooked) {
+                sHookedRules++;
+                DouyuLog.d("AdBlockHook", "已拦截竖屏屏下星海横幅容器 RamboXHAnimatedAdCompatNeuron");
+            }
+        } catch (Throwable ignored) {}
+
+        // 7b. 屏下通用广告横幅视图及 Presenter (XHCommonPlayerBannerView2, NewGamePlayerAdPresenter)
+        hookViewToGone(lpparam, "com.douyu.module.player.p.animatedad.widget.commonbanner.XHCommonPlayerBannerView2");
+        hookMethodByRule(
+                lpparam,
+                "com.douyu.module.player.p.animatedad.widget.commonbanner.XHCommonPlayerBannerView2",
+                new String[]{"W7", "ya"},
+                new int[]{6, 1},
+                false);
+        try {
+            Class<?> presenterCls = XposedHelpers.findClass(
+                    "com.douyu.module.player.p.animatedad.widget.commonbanner.NewGamePlayerAdPresenter",
+                    lpparam.classLoader);
+            boolean hooked = false;
+            for (Method m : presenterCls.getDeclaredMethods()) {
+                String name = m.getName();
+                Class<?>[] pTypes = m.getParameterTypes();
+                if (name.equals("a") && pTypes.length == 1
+                        && pTypes[0].getName().endsWith("XHCommonBannerDataBundle")
+                        && m.getReturnType() == void.class) {
+                    XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
+                    hooked = true;
+                } else if (name.equals("a0") && pTypes.length == 1 && m.getReturnType() == boolean.class) {
+                    XposedBridge.hookMethod(m, XC_MethodReplacement.returnConstant(false));
+                    hooked = true;
+                } else if (name.equals("Z") && pTypes.length == 3 && m.getReturnType() == void.class) {
+                    XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
+                    hooked = true;
+                }
+            }
+            if (hooked) {
+                sHookedRules++;
+            }
+        } catch (Throwable ignored) {}
+
+        // 7c. 星海广告定时刷新与 ViewHolder 分发 (PlayerAnimatedADNeuron, BizPresenter, ViewHolder)
+        hookMethodByRule(
+                lpparam,
+                "com.douyu.module.player.p.animatedad.PlayerAnimatedADNeuron",
+                new String[]{"KE"},
+                new int[]{0},
+                false);
+        hookMethodByRule(
+                lpparam,
+                "com.douyu.module.player.p.animatedad.PlayerAnimatedADBizPresenter",
+                new String[]{"I"},
+                new int[]{0},
+                false);
+        try {
+            Class<?> vhCls = XposedHelpers.findClass(
+                    "com.douyu.module.player.p.animatedad.PlayerAnimatedADViewHolder",
+                    lpparam.classLoader);
+            boolean hooked = false;
+            for (Method m : vhCls.getDeclaredMethods()) {
+                String name = m.getName();
+                Class<?>[] pTypes = m.getParameterTypes();
+                if (m.getReturnType() != void.class) {
+                    continue;
+                }
+                if (name.equals("b") && pTypes.length == 1 && pTypes[0].getName().endsWith("XHCommonBannerDataBundle")) {
+                    XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
+                    hooked = true;
+                } else if (name.equals("f") && pTypes.length == 1 && pTypes[0].getName().endsWith("StarSeaInfo")) {
+                    XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
+                    hooked = true;
+                } else if (name.equals("g1") && pTypes.length == 3) {
+                    XposedBridge.hookMethod(m, XC_MethodReplacement.DO_NOTHING);
+                    hooked = true;
+                }
+            }
+            if (hooked) {
+                sHookedRules++;
+            }
+        } catch (Throwable ignored) {}
+
+        // 7d. Tab 上方推广横幅/挂件 (AboveTabView, AboveTabMixView, PlayerAnimatedADWidgetV1Controller)
+        hookViewToGone(lpparam, "com.douyu.module.player.p.animatedad.widget.v1.entrance.widget.AboveTabView");
+        hookViewToGone(lpparam, "com.douyu.module.player.p.animatedad.widget.v1.entrance.widget.AboveTabMixView");
+        hookMethodByRule(
+                lpparam,
+                "com.douyu.module.player.p.animatedad.widget.v1.entrance.widget.AboveTabView",
+                new String[]{"ng"},
+                new int[]{1},
+                false);
+        hookMethodByRule(
+                lpparam,
+                "com.douyu.module.player.p.animatedad.widget.v1.entrance.widget.AboveTabMixView",
+                new String[]{"ng"},
+                new int[]{1},
+                false);
+        hookMethodByRule(
+                lpparam,
+                "com.douyu.module.player.p.animatedad.widget.v1.entrance.PlayerAnimatedADWidgetV1Controller",
+                new String[]{"d", "o", "BB", "yo"},
+                new int[]{1, 0, 1, 1},
+                false);
+        try {
+            Class<?> v1Cls = XposedHelpers.findClass(
+                    "com.douyu.module.player.p.animatedad.widget.v1.entrance.PlayerAnimatedADWidgetV1Controller",
+                    lpparam.classLoader);
+            for (Method m : v1Cls.getDeclaredMethods()) {
+                if (m.getName().equals("U8") && m.getParameterTypes().length == 1) {
+                    XposedBridge.hookMethod(m, new de.robv.android.xposed.XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            Object res = param.getResult();
+                            if (res instanceof android.view.View) {
+                                collapseAdView((android.view.View) res);
+                            }
+                        }
+                    });
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        // 7e. 激燃时刻/弹幕区顶部激励广告 (AdExcitingTimeNeuron, AdExcitingTimePresenter, AdExcitingTimeView)
+        hookViewToGone(lpparam, "com.douyu.sdk.ad.douyu.room.view.AdExcitingTimeView");
+        hookMethodByRule(
+                lpparam,
+                "com.douyu.module.player.p.advideo.addanmu.AdExcitingTimeNeuron",
+                new String[]{"EE", "onReceiveExcitingTimeAd", "onReceiveExcitingTimeMockAd"},
+                new int[]{1, 1, 1},
+                false);
+        hookMethodByRule(
+                lpparam,
+                "com.douyu.module.player.p.advideo.addanmu.base.AdExcitingTimePresenter",
+                new String[]{"d"},
+                new int[]{0},
+                false);
+
+        // 7f. 弹幕区游戏入口与悬浮球、官方图文广告 (AdImgEnterWidget, AdFloatBall, OfficeDanmuAdNeuron)
+        hookMethodByRule(
+                lpparam,
+                "com.douyu.live.p.adimg.AdImgEnterWidget",
+                new String[]{"A", "H"},
+                new int[]{0, 0},
+                true);
+        hookViewToGone(lpparam, "com.douyu.module.player.p.adfloatball.AdFloatBallView");
+        hookMethodByRule(
+                lpparam,
+                "com.douyu.module.player.p.adfloatball.AdFloatBallNeuron",
+                new String[]{"tF"},
+                new int[]{3},
+                false);
+        hookMethodByRule(
+                lpparam,
+                "com.douyu.module.player.p.officead.OfficeDanmuAdNeuron",
+                new String[]{"BE", "IE"},
+                new int[]{1, 0},
+                false);
+        hookMethodByRule(
+                lpparam,
+                "com.douyu.module.player.p.officead.OfficeDanmuAdNeuron",
+                new String[]{"EE"},
+                new int[]{1},
+                true);
+    }
+
     private static void hookAnimatedAdAndDanmuCard(final XC_LoadPackage.LoadPackageParam lpparam) {
         hookViewToGone(lpparam, "com.douyu.module.player.p.animatedad.widget.danmucard.DanmuCardWidgetContainer");
         hookViewToGone(lpparam, "com.douyu.module.player.p.animatedad.widget.danmucard.DanmuCardIconWidget");
@@ -780,13 +1042,13 @@ public class AdBlockHook {
                             if ((key != null && (key.toLowerCase().contains("shop") || key.toLowerCase().contains("goods") || key.toLowerCase().contains("bag") || key.toLowerCase().contains("game")))
                                     || clsName.contains("Shopping")) {
                                 param.setResult(null); // 精准阻断带货手提袋与手游推广入口挂载
-                                Log.i(TAG, "Blocked bottom shopping/game entrance: key=" + key + ", class=" + clsName);
+                                DouyuLog.d(TAG, "Blocked bottom shopping/game entrance: key=" + key + ", class=" + clsName);
                             }
                         } catch (Throwable ignored) {}
                     }
                 }
             });
-            Log.i(TAG, "Hooked RamboFunctionEntranceNeuron.OE -> precise shopping bag filter");
+            sHookedRules++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook RamboFunctionEntranceNeuron.OE", t);
         }
@@ -987,7 +1249,7 @@ public class AdBlockHook {
                 });
             } catch (Throwable ignored) {}
 
-            Log.i(TAG, "Permanently disabled View: " + className);
+            sDisabledViews++;
         } catch (Throwable ignored) {}
     }
 
@@ -1016,7 +1278,7 @@ public class AdBlockHook {
                         XposedBridge.hookMethod(m, XC_MethodReplacement.returnConstant(null));
                     }
                 }
-                Log.i(TAG, "Blocked AdFactory.e -> disabled all official ad views creation");
+                sHookedRules++;
             }
         } catch (Throwable ignored) {}
 
@@ -1084,7 +1346,7 @@ public class AdBlockHook {
                         XposedBridge.hookMethod(m, filterRecHook);
                     }
                 }
-                Log.i(TAG, "Hooked NewHomeRecDataFactory$Companion.a -> cleanly stripped ad cards from data source (No black gap)");
+                sHookedRules++;
             }
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook NewHomeRecDataFactory$Companion", t);
@@ -1127,7 +1389,7 @@ public class AdBlockHook {
                         XposedBridge.hookMethod(m, filterFeedHook);
                     }
                 }
-                Log.i(TAG, "Hooked FeedListWarpData -> cleanly stripped dynamic ad feed items");
+                sHookedRules++;
             }
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook FeedListWarpData", t);
@@ -1142,7 +1404,7 @@ public class AdBlockHook {
             if (dynamicAdItemCls != null) {
                 XposedHelpers.findAndHookMethod(dynamicAdItemCls, "isTargetData", Object.class,
                         XC_MethodReplacement.returnConstant(false));
-                Log.i(TAG, "Hooked DynamicAdItem.isTargetData -> return false");
+                sHookedRules++;
             }
         } catch (Throwable ignored) {}
 
@@ -1215,7 +1477,7 @@ public class AdBlockHook {
                         XposedBridge.hookMethod(m, bindHook);
                     }
                 }
-                Log.i(TAG, "Hooked RecyclerView.Adapter.bindViewHolder for feed ad removal");
+                sHookedRules++;
             }
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook RecyclerView.Adapter.bindViewHolder", t);
@@ -1247,7 +1509,8 @@ public class AdBlockHook {
                             });
                         }
                     }
-                    Log.i(TAG, "Hooked concrete adapter: " + adapterName);
+                    sHookedRules++;
+                    DouyuLog.d(TAG, "Hooked concrete adapter: " + adapterName);
                 }
             } catch (Throwable ignored) {}
         }

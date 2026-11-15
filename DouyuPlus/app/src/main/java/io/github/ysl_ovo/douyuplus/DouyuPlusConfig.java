@@ -29,6 +29,13 @@ public class DouyuPlusConfig {
     public static final int AUTO_QUALITY_ALWAYS = 2;
     public static final int DEFAULT_AUTO_QUALITY_MODE = AUTO_QUALITY_WIFI_ONLY;
 
+    public static final String KEY_AUTO_SWITCH_LINE = "enable_auto_switch_line";
+    public static final boolean DEFAULT_AUTO_SWITCH_LINE = false;
+
+    public static final String KEY_FOLLOW_ALL_SORT = "follow_last_all_sort";
+    public static final String KEY_FOLLOW_LIVE_SORT = "follow_last_live_sort";
+    public static final int DEFAULT_FOLLOW_SORT = 4; // FREQUENT_VISIT
+
     public static final String KEY_HIDE_BOTTOM_PLUS = "hide_bottom_plus";
     public static final boolean DEFAULT_HIDE_BOTTOM_PLUS = true;
 
@@ -78,7 +85,7 @@ public class DouyuPlusConfig {
     public static void setEnabled(Context context, String key, boolean value) {
         SharedPreferences prefs = getPrefs(context);
         if (prefs != null) {
-            prefs.edit().putBoolean(key, value).apply();
+            prefs.edit().putBoolean(key, value).commit();
         }
     }
 
@@ -130,7 +137,7 @@ public class DouyuPlusConfig {
     public static void setSgsrLevel(Context context, int level) {
         SharedPreferences prefs = getPrefs(context);
         if (prefs != null) {
-            prefs.edit().putInt(KEY_AI_STRENGTHEN_SGSR_LEVEL, level).apply();
+            prefs.edit().putInt(KEY_AI_STRENGTHEN_SGSR_LEVEL, level).commit();
         }
     }
 
@@ -142,7 +149,7 @@ public class DouyuPlusConfig {
     public static void setCasLevel(Context context, int level) {
         SharedPreferences prefs = getPrefs(context);
         if (prefs != null) {
-            prefs.edit().putInt(KEY_AI_STRENGTHEN_CAS_LEVEL, level).apply();
+            prefs.edit().putInt(KEY_AI_STRENGTHEN_CAS_LEVEL, level).commit();
         }
     }
 
@@ -164,7 +171,7 @@ public class DouyuPlusConfig {
     public static void setAutoQualityMode(Context context, int mode) {
         SharedPreferences prefs = getPrefs(context);
         if (prefs != null) {
-            prefs.edit().putInt(KEY_AUTO_QUALITY_MODE, mode).apply();
+            prefs.edit().putInt(KEY_AUTO_QUALITY_MODE, mode).commit();
         }
     }
 
@@ -192,7 +199,53 @@ public class DouyuPlusConfig {
     public static void setDefaultStartPage(Context context, int page) {
         SharedPreferences prefs = getPrefs(context);
         if (prefs != null) {
-            prefs.edit().putInt(KEY_DEFAULT_START_PAGE, page).apply();
+            prefs.edit().putInt(KEY_DEFAULT_START_PAGE, page).commit();
+        }
+    }
+
+    public static boolean isAutoSwitchLineEnabled() {
+        return isAutoSwitchLineEnabled(null);
+    }
+
+    public static boolean isAutoSwitchLineEnabled(Context context) {
+        return isEnabled(context, KEY_AUTO_SWITCH_LINE, DEFAULT_AUTO_SWITCH_LINE);
+    }
+
+    public static void setAutoSwitchLineEnabled(Context context, boolean enable) {
+        setEnabled(context, KEY_AUTO_SWITCH_LINE, enable);
+    }
+
+    private static int sanitizeFollowAllSort(int sort) {
+        return (sort == 2 || sort == 3 || sort == 4) ? sort : DEFAULT_FOLLOW_SORT;
+    }
+
+    private static int sanitizeFollowLiveSort(int sort) {
+        return (sort >= 1 && sort <= 4) ? sort : DEFAULT_FOLLOW_SORT;
+    }
+
+    public static int getFollowAllSort(Context context) {
+        SharedPreferences prefs = getPrefs(context);
+        int raw = prefs != null ? prefs.getInt(KEY_FOLLOW_ALL_SORT, DEFAULT_FOLLOW_SORT) : DEFAULT_FOLLOW_SORT;
+        return sanitizeFollowAllSort(raw);
+    }
+
+    public static void setFollowAllSort(Context context, int sort) {
+        SharedPreferences prefs = getPrefs(context);
+        if (prefs != null) {
+            prefs.edit().putInt(KEY_FOLLOW_ALL_SORT, sanitizeFollowAllSort(sort)).commit();
+        }
+    }
+
+    public static int getFollowLiveSort(Context context) {
+        SharedPreferences prefs = getPrefs(context);
+        int raw = prefs != null ? prefs.getInt(KEY_FOLLOW_LIVE_SORT, DEFAULT_FOLLOW_SORT) : DEFAULT_FOLLOW_SORT;
+        return sanitizeFollowLiveSort(raw);
+    }
+
+    public static void setFollowLiveSort(Context context, int sort) {
+        SharedPreferences prefs = getPrefs(context);
+        if (prefs != null) {
+            prefs.edit().putInt(KEY_FOLLOW_LIVE_SORT, sanitizeFollowLiveSort(sort)).commit();
         }
     }
 }

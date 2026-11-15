@@ -245,6 +245,7 @@ public class DanmuMergeHook {
     }
 
     public static void hook(XC_LoadPackage.LoadPackageParam lpparam) {
+        int hookedTargets = 0;
         Class<?> baseDanmakuCls;
         try {
             baseDanmakuCls = XposedHelpers.findClass(
@@ -276,7 +277,7 @@ public class DanmuMergeHook {
                             }
                         }
                     });
-                    Log.i(TAG, "✓ Hooked DanmakuNeuron.fn for live danmaku merging");
+                    hookedTargets++;
                     break;
                 }
             }
@@ -305,7 +306,7 @@ public class DanmuMergeHook {
                             }
                         }
                     });
-                    Log.i(TAG, "✓ Hooked DrawHandler.addDanmaku for live danmaku merging");
+                    hookedTargets++;
                     break;
                 }
             }
@@ -376,7 +377,7 @@ public class DanmuMergeHook {
                     });
                 }
             }
-            Log.i(TAG, "✓ Hooked DanmakuFactory duration lifecycle & independent createDanmaku");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook DanmakuFactory", t);
         }
@@ -395,7 +396,7 @@ public class DanmuMergeHook {
                         }
                     }
             );
-            Log.i(TAG, "✓ Hooked BaseDanmaku.isLate -> fixed premature block disappearance");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook BaseDanmaku.isLate", t);
         }
@@ -546,7 +547,7 @@ public class DanmuMergeHook {
                         }
                     }
             );
-            Log.i(TAG, "✓ Hooked BaseDanmaku.measure for thread-safe combo scaling");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook BaseDanmaku.measure", t);
         }
@@ -611,10 +612,12 @@ public class DanmuMergeHook {
                         }
                     }
             );
-            Log.i(TAG, "✓ Hooked R2LDanmaku.measure for constant-speed glide");
+            hookedTargets++;
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook R2LDanmaku.measure", t);
         }
+
+        Log.i(TAG, "Hooked DanmuMerge (" + hookedTargets + "/6 targets)");
     }
 
     /**
@@ -736,7 +739,6 @@ public class DanmuMergeHook {
                         try {
                             XposedHelpers.setIntField(prevDanmaku, "measureResetFlag", -1);
                         } catch (Throwable ignored) {}
-                        Log.i(TAG, "[MERGED] \"" + rawStr + "\" -> x" + existing.count + " (room=" + roomId + ")");
                         return true;
                     }
                 }
