@@ -160,7 +160,74 @@ public class AdBlockHook {
         // 16. 彻底铲除发现页（推荐流）、动态页等信息流广告卡片
         hookFeedAds(lpparam);
 
+        // 17. 屏蔽首页周期性弹出的青少年模式引导弹窗
+        hookYoungModeGuideDialog(lpparam);
+
         Log.i(TAG, "Hooked AdBlock (" + sHookedRules + " rules, " + sDisabledViews + " views disabled)");
+    }
+
+    /**
+     * 优雅屏蔽首页青少年模式引导弹窗 (YoungModeGuideDialog)：
+     * 1. 主防线：在 YoungModeMgr.l(Activity) 返回后将 true 改写为 false，保留其内部防沉迷状态同步，
+     *    并让 YoungModeGuideHelper.checkShow 自然走 next() 推进 DialogMgr 优先级队列；
+     * 2. 兜底防线：拦截 YoungModeMgr.q(Activity, OnDismissListener)，若被直接调用则触发 onDismiss
+     *    回调防队列阻塞并跳过弹窗创建。
+     */
+    private static void hookYoungModeGuideDialog(final XC_LoadPackage.LoadPackageParam lpparam) {
+        try {
+            Class<?> youngMgrCls = XposedHelpers.findClassIfExists(
+                    "com.douyu.module.young.YoungModeMgr",
+                    lpparam.classLoader
+            );
+            if (youngMgrCls == null) {
+                return;
+            }
+
+            XposedHelpers.findAndHookMethod(
+                    youngMgrCls,
+                    "l",
+                    Activity.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                            if (Boolean.TRUE.equals(param.getResult())) {
+                                param.setResult(false);
+                                DouyuLog.d(TAG, "Suppressed YoungModeGuideDialog trigger (YoungModeMgr.l -> false)");
+                            }
+                        }
+                    }
+            );
+            sHookedRules++;
+
+            Class<?> onDismissCls = XposedHelpers.findClassIfExists(
+                    "com.douyu.lib.prioritydialog.OnDismissListener",
+                    lpparam.classLoader
+            );
+            if (onDismissCls != null) {
+                XposedHelpers.findAndHookMethod(
+                        youngMgrCls,
+                        "q",
+                        Activity.class,
+                        onDismissCls,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                Object listener = param.args.length > 1 ? param.args[1] : null;
+                                if (listener != null) {
+                                    try {
+                                        XposedHelpers.callMethod(listener, "onDismiss");
+                                    } catch (Throwable ignored) {}
+                                }
+                                param.setResult(null);
+                                DouyuLog.d(TAG, "Blocked direct YoungModeMgr.q call");
+                            }
+                        }
+                );
+                sHookedRules++;
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Failed to hook YoungModeMgr for guide dialog suppression", t);
+        }
     }
 
     /**
