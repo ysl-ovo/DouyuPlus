@@ -8,6 +8,7 @@ import io.github.ysl_ovo.douyuplus.hooks.AddOneHook;
 import io.github.ysl_ovo.douyuplus.hooks.AiStrengthenHook;
 import io.github.ysl_ovo.douyuplus.hooks.AutoQualityHook;
 import io.github.ysl_ovo.douyuplus.hooks.DanmuCleanHook;
+import io.github.ysl_ovo.douyuplus.hooks.DanmuLayoutFixHook;
 import io.github.ysl_ovo.douyuplus.hooks.DanmuMergeHook;
 import io.github.ysl_ovo.douyuplus.hooks.DanmuSuffixHook;
 import io.github.ysl_ovo.douyuplus.hooks.DisableUpdateHook;
@@ -109,6 +110,9 @@ public class HookEntry implements IXposedHookLoadPackage {
         if (DouyuPlusConfig.isDanmuMergeEnabled()) {
             DanmuMergeHook.hook(lpparam);
         }
+
+        // 9.5 修复富文本弹幕（含角标/连击）偶发折行问题（始终开启）
+        DanmuLayoutFixHook.hook(lpparam);
 
         // 10. 自动切换最高画质 (支持 WiFi 下生效或始终生效)
         AutoQualityHook.hook(lpparam);
